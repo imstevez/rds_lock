@@ -1,7 +1,5 @@
 # redis_lock
 
----
-
 This library is an asynchronous Redis distributed read-write lock based on redis-rs's aio::ConnectionLike. Supports the following features:
 
 1. Read-write mutual exclusion: Only one write lock or multiple read locks can exist at the same time
