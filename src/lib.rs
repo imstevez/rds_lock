@@ -1,7 +1,12 @@
+//! This library is an asynchronous Redis distributed read-write lock based on redis-rs aio::ConnectionLike. It supports the following features:
+//!
+//! 1. Read-write mutual exclusion: Only one write lock or multiple read locks can exist at the same time.
+//! 2. Passive release: When the lock fails to be unlocked due to network or abnormal exit, the lock will be automatically released after the specified timeout.
+//! 3. Automatic extension: After the lock is successfully locked, the tokio thread will be started to automatically extend the lock time until the lock is actively released. (If the program exits abnormally and the lock is not actively released, the automatic extension will also be terminated and the lock will automatically expire and be released).
+//! 
 //! Examples
 //!
 //! 1. General usage
-//!
 //! ```rust
 //! use rds_lock::{Locker, Mode};
 //!
@@ -34,7 +39,6 @@
 //! ```
 //!
 //! 2. Closure usage
-//!
 //! ```rust
 //! use rds_lock::{Locker, Mode};
 //!
