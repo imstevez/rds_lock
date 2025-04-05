@@ -3,7 +3,7 @@
 //! 1. General usage
 //!
 //! ```rust
-//! use redis_lock::{Locker, Mode};
+//! use rds_lock::{Locker, Mode};
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
@@ -36,7 +36,7 @@
 //! 2. Closure usage
 //!
 //! ```rust
-//! use redis_lock::{Locker, Mode};
+//! use rds_lock::{Locker, Mode};
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {

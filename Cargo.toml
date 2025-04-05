@@ -1,7 +1,15 @@
 [package]
-name = "redis_lock"
+name = "rds_lock"
 version = "1.0.0"
 edition = "2024"
+authors = ["Steve Zhang <stevzhang01@gmail.com>"]
+license = "MIT"
+description = "This library is an asynchronous Redis distributed read-write lock"
+repository = "https://github.com/imstevez/rds_lock"
+keywords = ["distributed-lock", "redis-lock", "read-write-lock", "async"]
+categories = ["concurrency", "caching", "data-structures"]
+readme = "README.md"
+documentation = "https://docs.rs/rds_lock"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

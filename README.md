@@ -1,4 +1,4 @@
-# redis_lock
+# rds_lock
 
 This library is an asynchronous Redis distributed read-write lock based on redis-rs's aio::ConnectionLike. Supports the following features:
 
@@ -11,7 +11,7 @@ This library is an asynchronous Redis distributed read-write lock based on redis
 ### 1. General usage
 
 ```rust
-use redis_lock::{Locker, Mode};
+use rds_lock::{Locker, Mode};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
 ### 2. Closure usage
 
 ```rust
-use redis_lock::{Locker, Mode};
+use rds_lock::{Locker, Mode};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
