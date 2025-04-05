@@ -47,8 +47,6 @@ async fn main() -> anyhow::Result<()> {
 
 ```rust
 use redis_lock::{Locker, Mode};
-use std::iter;
-use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -59,13 +57,12 @@ async fn main() -> anyhow::Result<()> {
     // Do something in closure with lock guard, no explicit unlock needed.
     // If the lock is successful, lock_exec finally returns 
     // the return value of the closure.
-    let r = Locker::new(con.clone()).lock_exec(key.clone(), async {
+    Locker::new(con.clone()).lock_exec(key.clone(), async {
         for x in (1..10) {
             println!("{}", x);
         }
         Ok(())
-    }).await;
-    
-    r
+    }).await
 }
+
  ```
