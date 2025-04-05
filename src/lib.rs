@@ -17,7 +17,7 @@
 //!     let w_unlock = Locker::new(con.clone()).lock(key.clone()).await?;
 //!
 //!     // Do something with lock guard.
-//!     for x in (1..10) {
+//!     for x in 1..10 {
 //!         println!("{}", x);
 //!     }
 //!
@@ -48,7 +48,7 @@
 //!     // If the lock is successful, lock_exec finally returns
 //!     // the return value of the closure.
 //!     let r = Locker::new(con.clone()).lock_exec(key.clone(), async {
-//!         for x in (1..10) {
+//!         for x in 1..10 {
 //!             println!("{}", x);
 //!         }
 //!         Ok(())
