@@ -3,7 +3,7 @@
 //! 1. Read-write mutual exclusion: Only one write lock or multiple read locks can exist at the same time.
 //! 2. Passive release: When the lock fails to be unlocked due to network or abnormal exit, the lock will be automatically released after the specified timeout.
 //! 3. Automatic extension: After the lock is successfully locked, the tokio thread will be started to automatically extend the lock time until the lock is actively released. (If the program exits abnormally and the lock is not actively released, the automatic extension will also be terminated and the lock will automatically expire and be released).
-//! 
+//!
 //! Examples
 //!
 //! 1. General usage
@@ -67,6 +67,7 @@ use anyhow::{Result, anyhow};
 use derive_more::Display;
 use redis::Script;
 use redis::aio::ConnectionLike;
+use std::any::Any;
 use tokio::select;
 use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
@@ -183,7 +184,11 @@ impl<T: ConnectionLike + Send + Clone + 'static> Locker<T> {
     /// Executed the specified closure function with lock guard of the specified key.
     /// It returns result of the closure, and result of unlock will be ignored.
     /// Todo: Use macros to achieve the same functionality
-    pub async fn lock_exec<F: Future<Output = Result<()>>>(self, key: String, f: F) -> Result<()> {
+    pub async fn lock_exec<V: Any, F: Future<Output = Result<V>>>(
+        self,
+        key: String,
+        f: F,
+    ) -> Result<V> {
         let unlock = self.lock(key.to_string()).await?;
         let r = f.await;
         let _ = unlock.await;
@@ -399,5 +404,30 @@ mod test {
 
         log::info!("Should unlock write-lock...");
         w_unlock.await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_lock_exec() {
+        simple_logger::init_with_level(log::Level::Info).unwrap();
+
+        let url = "redis://:c6bfb872-49f6-48bc-858d-2aca0c020702@127.0.0.1:8003/0";
+        let cli = redis::Client::open(url).unwrap();
+        let cfg = redis::aio::ConnectionManagerConfig::new().set_max_delay(1000);
+        let con = redis::aio::ConnectionManager::new_with_config(cli, cfg)
+            .await
+            .unwrap();
+        let key = String::from("test:lock_key");
+
+        log::info!("Should exec with lock guard, and return the closure returned...");
+
+        let r = Locker::new(con)
+            .mode(&Mode::W)
+            .lock_exec(key, async {
+                sleep(Duration::from_secs(5)).await;
+                Ok(1)
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(r, 1);
     }
 }
