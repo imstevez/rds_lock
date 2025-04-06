@@ -330,8 +330,6 @@ mod test {
 
     #[tokio::test]
     async fn test_lock_exclusive() {
-        simple_logger::init_with_level(log::Level::Info).unwrap();
-
         let url = "redis://:c6bfb872-49f6-48bc-858d-2aca0c020702@127.0.0.1:8003/0";
         let cli = redis::Client::open(url).unwrap();
         let cfg = redis::aio::ConnectionManagerConfig::new().set_max_delay(1000);
@@ -340,7 +338,7 @@ mod test {
             .unwrap();
         let key = String::from("test:lock_key");
 
-        log::info!("Should lock read-locks concurrently...");
+        // Should lock read-locks concurrently.
         let r_unlocks: Vec<_> = stream::iter(
             iter::repeat_with(|| {
                 let con = con.clone();
@@ -355,10 +353,10 @@ mod test {
         .collect()
         .await;
 
-        log::info!("Should extend read-locks automatically...");
+        // Should extend read-locks automatically.
         sleep(Duration::from_secs(5)).await;
 
-        log::info!("Should not lock write-lock when read-lock exists...");
+        // Should not lock write-lock when read-lock exists.
         assert!(
             Locker::new(con.clone())
                 .mode(&Mode::W)
@@ -367,24 +365,24 @@ mod test {
                 .is_err()
         );
 
-        log::info!("Should unlock read-locks...");
+        // Should unlock read-locks.
         stream::iter(r_unlocks)
             .for_each(|unlock| async {
                 unlock.await.unwrap();
             })
             .await;
 
-        log::info!("Should lock write-lock...");
+        // Should lock write-lock
         let w_unlock = Locker::new(con.clone())
             .mode(&Mode::W)
             .lock(key.clone())
             .await
             .unwrap();
 
-        log::info!("Should extend write-lock automatically...");
+        // Should extend write-lock automatically.
         sleep(Duration::from_secs(5)).await;
 
-        log::info!("Should not lock write-lock when write-lock exists...");
+        // Should not lock write-lock when write-lock exists.
         assert!(
             Locker::new(con.clone())
                 .mode(&Mode::W)
@@ -393,7 +391,7 @@ mod test {
                 .is_err()
         );
 
-        log::info!("Should not lock read-lock when write-lock exists...");
+        // Should not lock read-lock when write-lock exists.
         assert!(
             Locker::new(con.clone())
                 .mode(&Mode::R)
@@ -402,22 +400,20 @@ mod test {
                 .is_err()
         );
 
-        log::info!("Should unlock write-lock...");
+        // Should unlock write-lock.
         w_unlock.await.unwrap();
     }
     #[tokio::test]
     async fn test_lock_exec() {
-        simple_logger::init_with_level(log::Level::Info).unwrap();
-
         let url = "redis://:c6bfb872-49f6-48bc-858d-2aca0c020702@127.0.0.1:8003/0";
         let cli = redis::Client::open(url).unwrap();
         let cfg = redis::aio::ConnectionManagerConfig::new().set_max_delay(1000);
         let con = redis::aio::ConnectionManager::new_with_config(cli, cfg)
             .await
             .unwrap();
-        let key = String::from("test:lock_key");
+        let key = String::from("test:lock_key_exec");
 
-        log::info!("Should exec with lock guard, and return the closure returned...");
+        // Should exec with lock guard, and return the closure returned.
 
         let r = Locker::new(con)
             .mode(&Mode::W)
