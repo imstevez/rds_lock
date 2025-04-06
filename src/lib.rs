@@ -1,4 +1,6 @@
-//! This library is an asynchronous Redis distributed read-write lock based on redis-rs aio::ConnectionLike. It supports the following features:
+//! An implementation of asynchronous redis distributed read-write lock based on redis-rs aio::ConnectionLike.
+//! 
+//! It supports the following features:
 //!
 //! 1. Read-write mutual exclusion: Only one write lock or multiple read locks can exist at the same time.
 //! 2. Passive release: When the lock fails to be unlocked due to network or abnormal exit, the lock will be automatically released after the specified timeout.
@@ -64,7 +66,6 @@
 pub mod lua_script;
 
 use anyhow::{Result, anyhow};
-use derive_more::Display;
 use redis::Script;
 use redis::aio::ConnectionLike;
 use std::any::Any;
@@ -197,7 +198,7 @@ impl<T: ConnectionLike + Send + Clone + 'static> Locker<T> {
 }
 
 /// Lock mode
-#[derive(Clone, Display)]
+#[derive(Clone)]
 pub enum Mode {
     /// Read mode
     R,
@@ -224,8 +225,6 @@ pub async fn lock<T: ConnectionLike>(
 ) -> Result<String> {
     let id = uuid::Uuid::new_v4().to_string();
 
-    log::info!("LCK<{}> [BG] {} {}", mode, key, id);
-
     let script = match mode {
         Mode::R => Script::new(lua_script::R_LOCK),
         Mode::W => Script::new(lua_script::W_LOCK),
@@ -235,7 +234,6 @@ pub async fn lock<T: ConnectionLike>(
         r = async move {
             loop {
                 if let 1 = script.key(key).arg(&id).arg(to).invoke_async(conn).await? {
-                    log::info!("LCK<{}> [OK] {} {}", mode, key, id);
                     break Ok(id);
                 }
                 sleep(Duration::from_millis(rty_iv)).await
@@ -245,7 +243,6 @@ pub async fn lock<T: ConnectionLike>(
             match rty_to {
                 0.. => {
                     sleep(Duration::from_millis(rty_to as u64)).await;
-                    log::info!("LCK<{}> [TO] {}", mode, key);
                     Some(Err(anyhow!("Timed out")))
                 }
                 _ => None,
@@ -270,22 +267,14 @@ pub async fn extend<T: ConnectionLike>(
     // Passive timeout milliseconds.
     to: u64,
 ) -> Result<()> {
-    log::info!("EXT<{}> [BG] {} {}", mode, key, id);
-
     let script = match mode {
         Mode::R => Script::new(lua_script::R_EXTEND),
         Mode::W => Script::new(lua_script::W_EXTEND),
     };
 
     match script.key(key).arg(id).arg(to).invoke_async(conn).await? {
-        1 => {
-            log::info!("EXT<{}> [OK] {} {}", mode, key, id);
-            Ok(())
-        }
-        _ => {
-            log::info!("EXT<{}> [NF] {} {}", mode, key, id);
-            Err(anyhow!("Not found"))
-        }
+        1 => Ok(()),
+        _ => Err(anyhow!("Not found")),
     }
 }
 
@@ -303,22 +292,14 @@ pub async fn unlock<T: ConnectionLike>(
     // Lock id.
     id: &str,
 ) -> Result<()> {
-    log::info!("UCK<{}> [BG] {} {}", mode, key, id);
-
     let script = match mode {
         Mode::R => Script::new(lua_script::R_UNLOCK),
         Mode::W => Script::new(lua_script::W_UNLOCK),
     };
 
     match script.key(key).arg(id).invoke_async(conn).await? {
-        1 => {
-            log::info!("UCK<{}> [OK] {} {}", mode, key, id);
-            Ok(())
-        }
-        _ => {
-            log::info!("UCK<{}> [NF] {} {}", mode, key, id);
-            Err(anyhow!("Not found"))
-        }
+        1 => Ok(()),
+        _ => Err(anyhow!("Not found")),
     }
 }
 
@@ -414,7 +395,6 @@ mod test {
         let key = String::from("test:lock_key_exec");
 
         // Should exec with lock guard, and return the closure returned.
-
         let r = Locker::new(con)
             .mode(&Mode::W)
             .lock_exec(key, async {

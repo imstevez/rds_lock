@@ -1,6 +1,8 @@
 # rds_lock
 
-This library is an asynchronous Redis distributed read-write lock based on redis-rs aio::ConnectionLike. It supports the following features:
+An implementation of asynchronous redis distributed read-write lock based on redis-rs aio::ConnectionLike.
+
+It supports the following features:
 
 1. Read-write mutual exclusion: Only one write lock or multiple read locks can exist at the same time.
 2. Passive release: When the lock fails to be unlocked due to network or abnormal exit, the lock will be automatically released after the specified timeout.
