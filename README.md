@@ -1,12 +1,15 @@
 # rds_lock
 
-An implementation of asynchronous redis distributed read-write lock based on redis-rs aio::ConnectionLike.
+A simple and easy-to-use asynchronous redis distributed read-write lock implementation based on tokio and redis-rs.
 
 It supports the following features:
 
 1. Read-write mutual exclusion: Only one write lock or multiple read locks can exist at the same time.
-2. Passive release: When the lock fails to be unlocked due to network or abnormal exit, the lock will be automatically released after the specified timeout.
-3. Automatic extension: After the lock is successfully locked, the tokio thread will be started to automatically extend the lock time until the lock is actively released. (If the program exits abnormally and the lock is not actively released, the automatic extension will also be terminated and the lock will automatically expire and be released).
+2. Passive release: When the lock fails to be unlocked due to network or abnormal exit, the lock will be automatically
+   released after the specified timeout.
+3. Automatic extension: After the lock is successfully locked, a Future will be spawned to automatically extend the lock
+   time until the lock is actively released. (If the program exits abnormally and the lock is not actively released, the
+   automatic extension will also be terminated and the lock will automatically expire and be released).
 
 ## Examples
 
@@ -43,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
 }
  ```
 
-### 2. Closure usage
+### 2. Future closure usage
 
 ```rust
 use rds_lock::{Locker, Mode};
@@ -64,5 +67,33 @@ async fn main() -> anyhow::Result<()> {
         Ok(())
     }).await
 }
+```
 
- ```
+### 3. Custom execution parameters
+
+```rust
+use rds_lock::{Locker, Mode};
+//!
+#[tokio::main]
+async fn main() -> anyhow::Result<i32> {
+    let cli = redis::Client::open("redis://127.0.0.1:6379/0")?;
+    let con = redis::aio::ConnectionManager::new(cli).await?;
+    let key = "lock_key".into();
+
+    let locker = Locker::new(con)
+        .mode(&Mode::R) // Set lock mode, default write-mode.
+        .to(2000)       // Set milliseconds of lock passive timeout, default 3000.
+        .rty_int(200)   // Set milliseconds of retry lock interval milliseconds, default 100.
+        .rty_to(1500)   // Set milliseconds of retry lock timeout milliseconds, default 1000, if set to -1, means retry never timed out.
+        .ext_int(800);  // Set milliseconds of extend lock interval, default 1000.
+
+    // Do something with lock guard
+    locker.lock_exec(key, async {
+        let mut r = 0;
+        for x in 1..10 {
+            r += x;
+        }
+        Ok(r)
+    })
+}
+```

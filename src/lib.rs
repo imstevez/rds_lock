@@ -1,12 +1,12 @@
-//! An implementation of asynchronous redis distributed read-write lock based on redis-rs aio::ConnectionLike.
-//! 
+//! A simple and easy-to-use asynchronous redis distributed read-write lock implementation based on tokio and redis-rs.
+//!
 //! It supports the following features:
 //!
 //! 1. Read-write mutual exclusion: Only one write lock or multiple read locks can exist at the same time.
 //! 2. Passive release: When the lock fails to be unlocked due to network or abnormal exit, the lock will be automatically released after the specified timeout.
-//! 3. Automatic extension: After the lock is successfully locked, the tokio thread will be started to automatically extend the lock time until the lock is actively released. (If the program exits abnormally and the lock is not actively released, the automatic extension will also be terminated and the lock will automatically expire and be released).
+//! 3. Automatic extension: After the lock is successfully locked, a future will be spawned to automatically extend the lock passive timeout until the lock is actively released. (If the program exits abnormally and the lock is not actively released, the automatic extension will also be terminated and the lock will automatically expire and be released).
 //!
-//! Examples
+//! # Examples
 //!
 //! 1. General usage
 //! ```rust
@@ -28,19 +28,19 @@
 //!         println!("{}", x);
 //!     }
 //!
-//!     // When key is locked in write mode, the other write or read lock should fail.
+//!     // When the key is locked in write mode, the other write or read lock should fail.
 //!     assert!(Locker::new(con.clone()).mode(&Mode::W).lock(key.clone()).await.is_err());
 //!     assert!(Locker::new(con.clone()).mode(&Mode::R).lock(key.clone()).await.is_err());
 //!
 //!     // Explicit unlock is required.
-//!     // In most cases you should ignore unlock errors.
+//!     // In most cases you should ignore the unlock result.
 //!     let _ = w_unlock.await?;
 //!
 //!     Ok(())
 //! }
 //! ```
 //!
-//! 2. Closure usage
+//! 2. Future closure usage
 //! ```rust
 //! use rds_lock::{Locker, Mode};
 //!
@@ -63,15 +63,42 @@
 //!     r
 //! }
 //! ```
+//!
+//! 3. Custom execution parameters
+//! ```rust
+//! use rds_lock::{Locker, Mode};
+//!
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<i32> {
+//!     let cli = redis::Client::open("redis://127.0.0.1:6379/0")?;
+//!     let con = redis::aio::ConnectionManager::new(cli).await?;
+//!     let key = "lock_key".into();
+//!     
+//!     let locker = Locker::new(con)
+//!         .mode(&Mode::R) // Set lock mode, default write-mode.
+//!         .to(2000)       // Set milliseconds of lock passive timeout, default 3000.
+//!         .rty_int(200)   // Set milliseconds of retry lock interval milliseconds, default 100.
+//!         .rty_to(1500)   // Set milliseconds of retry lock timeout milliseconds, default 1000, if set to -1, means retry never timed out.
+//!         .ext_int(800);  // Set milliseconds of extend lock interval, default 1000.
+//!
+//!     // Do something with lock guard
+//!     locker.lock_exec(key, async {
+//!         let mut r = 0;
+//!         for x in 1..10 {
+//!             r += x;
+//!         }
+//!         Ok(r)
+//!    })
+//! }
+//! ```
 pub mod lua_script;
 
 use anyhow::{Result, anyhow};
 use redis::Script;
 use redis::aio::ConnectionLike;
 use std::any::Any;
-use tokio::select;
 use tokio::time::{Duration, sleep};
-use tokio_util::sync::CancellationToken;
+use tokio::{select, spawn, sync::oneshot};
 
 /// Locker provides an easy-to-use lock builder and bundles the function of
 /// automatic passive timeout extend.
@@ -151,20 +178,19 @@ impl<T: ConnectionLike + Send + Clone + 'static> Locker<T> {
         let key_c = key.clone();
         let id_c = id.clone();
 
-        let ext_cancel_t = CancellationToken::new();
-        let ext_cancel_r = ext_cancel_t.clone();
-        let ext_itv = Duration::from_millis(self.ext_iv);
+        let (ext_tx, mut ext_rx) = oneshot::channel();
+        let ext_iv = Duration::from_millis(self.ext_iv);
 
-        let ext_handle = tokio::spawn(async move {
+        let ext = spawn(async move {
             let mut ext_ac = self.ext_iv;
             loop {
                 select! {
-                    _ = ext_cancel_r.cancelled() => break,
-                    _ = sleep(ext_itv) => {
-                        if extend(&mut conn_c, &mode_c, &key_c, &id_c, self.to).await.is_err() {
+                    _ = &mut ext_rx => break,
+                    _ = sleep(ext_iv) => {
+                        if extend(&mut conn_c, &mode_c, &key_c, &id_c, self.to).await.is_ok() {
                             ext_ac += self.ext_iv;
                             if ext_ac > self.to {
-                                panic!("Extend failed")
+                            panic!("Failed to extend lock")
                             }
                         }
                         ext_ac = self.ext_iv;
@@ -174,8 +200,10 @@ impl<T: ConnectionLike + Send + Clone + 'static> Locker<T> {
         });
 
         let unlock = async move {
-            ext_cancel_t.cancel();
-            ext_handle.await?;
+            if ext_tx.send(()).is_err() {
+                panic!("Failed to stop lock extension");
+            }
+            ext.await?;
             unlock(&mut self.conn, &self.mode, &key, &id).await
         };
 
@@ -306,7 +334,6 @@ pub async fn unlock<T: ConnectionLike>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use futures::stream::{self, StreamExt};
     use std::iter;
 
     #[tokio::test]
@@ -319,25 +346,25 @@ mod test {
             .unwrap();
         let key = String::from("test:lock_key");
 
-        // Should lock read-locks concurrently.
-        let r_unlocks: Vec<_> = stream::iter(
-            iter::repeat_with(|| {
-                let con = con.clone();
-                let key = key.clone();
-                tokio::spawn(async move { Locker::new(con).mode(&Mode::R).lock(key).await })
-            })
-            .take(10)
-            .collect::<Vec<_>>(),
-        )
-        .then(|lck_handle| async move { lck_handle.await.unwrap() })
-        .map(|lck_result| lck_result.unwrap())
-        .collect()
-        .await;
+        // Should concurrently lock key multiple times with read-mode.
+        let r_locks: Vec<_> = iter::repeat_with(|| {
+            let con = con.clone();
+            let key = key.clone();
+            spawn(async move { Locker::new(con).mode(&Mode::R).lock(key).await })
+        })
+        .take(10)
+        .collect();
 
-        // Should extend read-locks automatically.
+        // Wait for lock future completed and collect unlock futures.
+        let mut r_unlocks = Vec::new();
+        for r_lock in r_locks {
+            r_unlocks.push(r_lock.await.unwrap().unwrap());
+        }
+
+        // Should automatically extend the passive timeout of lock in read-mode.
         sleep(Duration::from_secs(5)).await;
 
-        // Should not lock write-lock when read-lock exists.
+        // Should not lock key with write-mode when it has been locked with read-mode.
         assert!(
             Locker::new(con.clone())
                 .mode(&Mode::W)
@@ -346,24 +373,22 @@ mod test {
                 .is_err()
         );
 
-        // Should unlock read-locks.
-        stream::iter(r_unlocks)
-            .for_each(|unlock| async {
-                unlock.await.unwrap();
-            })
-            .await;
+        // Should unlock key locked in read-mode.
+        for r_unlock in r_unlocks {
+            r_unlock.await.unwrap();
+        }
 
-        // Should lock write-lock
+        // Should lock key with write-mode.
         let w_unlock = Locker::new(con.clone())
             .mode(&Mode::W)
             .lock(key.clone())
             .await
             .unwrap();
 
-        // Should extend write-lock automatically.
+        // Should automatically extend the passive timeout of lock in write-mode.
         sleep(Duration::from_secs(5)).await;
 
-        // Should not lock write-lock when write-lock exists.
+        // Should not lock key with write-mode when it has been locked with write-mode.
         assert!(
             Locker::new(con.clone())
                 .mode(&Mode::W)
@@ -372,7 +397,7 @@ mod test {
                 .is_err()
         );
 
-        // Should not lock read-lock when write-lock exists.
+        // Should not lock key with read-mode when it has been locked with write-mode.
         assert!(
             Locker::new(con.clone())
                 .mode(&Mode::R)
@@ -381,9 +406,10 @@ mod test {
                 .is_err()
         );
 
-        // Should unlock write-lock.
+        // Should unlock key locked in write-mode.
         w_unlock.await.unwrap();
     }
+
     #[tokio::test]
     async fn test_lock_exec() {
         let url = "redis://:c6bfb872-49f6-48bc-858d-2aca0c020702@127.0.0.1:8003/0";
